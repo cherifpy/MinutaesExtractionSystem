@@ -5,6 +5,8 @@ import os
 import tensorflow as tf
 import copy
 from models import *
+import math
+from collections import Counter
 
 def DecoupageEnBlocs(image_path:str,bloc_size:int=45):
 
@@ -177,7 +179,6 @@ def MinutaeZoneDetectionV2(model,bloc, coord_bloc):
     bloc_mask[9*(i+1):9*(i+2),9*(j+1):9*(j+2)] = 255
     Y = coord_bloc[1]+9*(j+1)+5
     X = coord_bloc[0]+9*(i+1)+5
-
     return Y, X, np.max(softmax_predictions)
 
 def MinutaesExtraction(image_path, bloc_size, codageM1, weight_fM1, codageM2, weight_fM2):
@@ -255,30 +256,28 @@ def MinutiaesExtractionV2(image_path, bloc_size, codageM1, weight_fM1, codageM2,
                         new_bloc = np.ones((45, 45), dtype=neighbors_blocs[i][j].dtype)
                         new_bloc[0:neighbors_blocs[i][j].shape[0], 0:neighbors_blocs[i][j].shape[1]] = neighbors_blocs[i][j]
                         reshaped_bloc_2 = tf.reshape(new_bloc, shape=(1, 45,45,1))
-
                     else:
                         reshaped_bloc_2 = tf.reshape(neighbors_blocs[i][j], shape=(1, 45,45,1))                               
                         
                     Y,X, prob = MinutaeZoneDetectionV2(model2,reshaped_bloc_2,neighbors_blocs_coords[i][j])
                     
-                    minu_cords.append((Y,X, prob))
-                    
+                    minu_cords.append((Y,X))
 
-
-            max_prob = max(minu_cords, key=lambda x : x[2])#max(minu_cords, key=lambda x: x[2])
-
-            """
-            mean_y = sum(y for y, x in minu_cords) / len(minu_cords)
-            mean_x = sum(x for y, x in minu_cords) / len(minu_cords)
+            #max_prob = max(minu_cords, key=lambda x : x[2])#max(minu_cords, key=lambda x: x[2])
+            #print(max_prob) #0.2536117
+            
+            #mean_y = sum(y for y, x in minu_cords) / len(minu_cords)
+            #mean_x = sum(x for y, x in minu_cords) / len(minu_cords)
 
             # Create a new tuple with the mean values
-            mean_tuple = (mean_y, mean_x)
-            """
-            mean_y,mean_x,_ = max_prob
-            new_image = cv.circle(new_image, (int(mean_y),int(mean_x)), 4,(255,0,0),1)
+            #mean_tuple = (mean_y, mean_x)
 
-            minutaes[len(minutaes.keys())+1] = {"Num":len(minutaes.keys())+1,"X":mean_x,"Y":mean_y, "prob":max_prob[2]}
-
+            best_cord, count_ = get_most_occured_tuple(minu_cords)
+            #mean_y,mean_x,_ = max_prob
+            new_image = cv.circle(new_image, (int(best_cord[0]),int(best_cord[1])), 4,(255,0,0),1)
+            #print(len(minutaes.keys())+1)
+            minutaes[len(minutaes.keys())+1] = {"Num":len(minutaes.keys())+1,"X":best_cord[0],"Y":best_cord[1]}
+            
             count+=1
 
         else:
@@ -287,7 +286,7 @@ def MinutiaesExtractionV2(image_path, bloc_size, codageM1, weight_fM1, codageM2,
     return new_image*255,supprimer_instances_proches(minutaes)    
 
 
-def supprimer_instances_proches(minutaes):
+def supprimer_instances_proches(minutaes_dict):
     """
     Supprime pour chaque instance, les instances proches (distance euclidienne < 10) 
     ayant la plus faible probabilité.
@@ -298,34 +297,36 @@ def supprimer_instances_proches(minutaes):
     Returns:
         minutaes: Le dictionnaire mis à jour après suppression des instances proches.
     """
-
+    deleted_key = []
     # Parcourir chaque instance
-    for i in range(len(minutaes)):
-        # Déterminer les instances proches
-        distances = []
-        for j in range(len(minutaes)):
-            if i != j:
-                distance = euclidean_distance(minutaes[i]["X"], 
-                                            minutaes[i]["Y"], 
-                                            minutaes[j]["X"], 
-                                            minutaes[j]["Y"])
-                distances.append((j, distance))
-
-        # Supprimer l'instance proche avec la plus faible probabilité
-        if distances:
-            distances.sort(key=lambda x: x[1])
-            j_min, _ = distances[0]
-        if minutaes[i]["prob"] < minutaes[j_min]["prob"]:
-            del minutaes[i]
-        else:
-            del minutaes[j_min]
-
-    return minutaes
+    for i in range(1,len(minutaes_dict)+1):
+        if not i in deleted_key: 
+            # Déterminer les instances proches
+            distances = []
+            for j in range(1,len(minutaes_dict)+1):
+                if not j in deleted_key: 
+                    if i != j:
+                        distance = math.sqrt(((minutaes_dict[i]["X"] -  minutaes_dict[j]["X"])**2 + ( minutaes_dict[i]["Y"] -  minutaes_dict[j]["Y"])**2)) 
+                        distances.append((j, distance))
+        
+            for j, dist in distances:
+                if dist < 16: 
+                    deleted_key.append(j)
 
 
- 
 
+    for i in deleted_key:
+        
+        del minutaes_dict[i]
 
- 
+    return minutaes_dict
+
+def get_most_occured_tuple(data_list):
+
+    tuple_counts = Counter(data_list)
+    if not tuple_counts:
+        return None
+
+    return tuple_counts.most_common(1)[0]
 
 
