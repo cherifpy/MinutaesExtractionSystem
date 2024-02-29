@@ -41,7 +41,7 @@ def DecoupageEnBlocs(image_path:str,bloc_size:int=45):
             
             blocks.append(bloc)
             
-    return blocks, coord_blocs, new_image
+    return blocks, coord_blocs, new_image, width_to_add, height_to_add
 
 
 def DecoupageEnBlocsV2(image_path:str,bloc_size:int=45):
@@ -169,16 +169,18 @@ def MinutaeZoneDetectionV2(model,bloc, coord_bloc):
 
     prediction = int(prediction_labels)
 
+
     bloc_mask = np.zeros((45,45,1), dtype=np.uint8)
 
     i = int(prediction // 3)
     j = int(prediction % 3)
     
+    
     bloc_mask[9*(i+1):9*(i+2),9*(j+1):9*(j+2)] = 255
     Y = coord_bloc[1]+9*(j+1)+5
     X = coord_bloc[0]+9*(i+1)+5
 
-    return Y, X, np.max(softmax_predictions)
+    return Y, X
 
 def MinutaesExtraction(image_path, bloc_size, codageM1, weight_fM1, codageM2, weight_fM2):
 
@@ -209,12 +211,13 @@ def MinutaesExtraction(image_path, bloc_size, codageM1, weight_fM1, codageM2, we
     return new_image*255,minutaes
 
 
-def GenerateNighbords(num_bloc:int,coords_blocs,image,bloc_size):
+def GenerateNighbords(num_bloc:int,coords_blocs,image,bloc_size=45):
     """
         Cette methode de decoupage construit des bloc avec chavauchement
     """
 
     y, x = coords_blocs[num_bloc] 
+
     blocs = [
         [image[y-9:y-9+bloc_size,x-9:x-9+bloc_size],image[y-9:y-9+bloc_size,x:x+bloc_size],image[y-9:y-9+bloc_size,x+9:x+9+bloc_size]],
         [image[y  :y+bloc_size  ,x-9:x-9+bloc_size],image[y  :y+bloc_size  ,x:x+bloc_size],image[y  :y+bloc_size  ,x+9:x+9+bloc_size]],
@@ -230,12 +233,11 @@ def GenerateNighbords(num_bloc:int,coords_blocs,image,bloc_size):
     return blocs,neighbors_blocs_coords
 
 def MinutiaesExtractionV2(image_path, bloc_size, codageM1, weight_fM1, codageM2, weight_fM2):
-    blocs_list,coords_blocs, new_image = DecoupageEnBlocs(image_path,bloc_size)
+    blocs_list,coords_blocs, new_image, _, _ = DecoupageEnBlocs(image_path,bloc_size)
     image = cv.imread(image_path,cv.IMREAD_GRAYSCALE)
     
     model1, model2 = LoadModels(bloc_size,codageM1,weight_fM1, codageM2, weight_fM2)
 
-    blocs_mask = []
     minutaes = {}
     count = 0
 
@@ -247,85 +249,32 @@ def MinutiaesExtractionV2(image_path, bloc_size, codageM1, weight_fM1, codageM2,
         if exist:
             #model,bloc, image, coord_bloc
             #Here i have to generate 9 images //num_bloc:int,coords_blocs,image,bloc_size
-            neighbors_blocs,neighbors_blocs_coords = GenerateNighbords(b_num,coords_blocs,image,bloc_size[0])
+            neighbors_blocs,neighbors_blocs_coords = GenerateNighbords(b_num,coords_blocs,image)
             minu_cords = []
             for i in range(len(neighbors_blocs)):
                 for j in range(len(neighbors_blocs[i])):
-                    if neighbors_blocs[i][j].shape != (45,45):
-                        new_bloc = np.ones((45, 45), dtype=neighbors_blocs[i][j].dtype)
-                        new_bloc[0:neighbors_blocs[i][j].shape[0], 0:neighbors_blocs[i][j].shape[1]] = neighbors_blocs[i][j]
-                        reshaped_bloc_2 = tf.reshape(new_bloc, shape=(1, 45,45,1))
+                    reshaped_bloc = tf.reshape(neighbors_blocs[i][j], shape=(1, 45,45,1))
+                    exist_2, bloc_classified_2 = BlocsClassification(model1,reshaped_bloc)
 
-                    else:
-                        reshaped_bloc_2 = tf.reshape(neighbors_blocs[i][j], shape=(1, 45,45,1))                               
+                    if exist_2:                                             #model,bloc, image, coord_bloc
+                        Y, X = MinutaeZoneDetectionV2(model2,reshaped_bloc,neighbors_blocs_coords[i][j])
                         
-                    Y,X, prob = MinutaeZoneDetectionV2(model2,reshaped_bloc_2,neighbors_blocs_coords[i][j])
-                    
-                    minu_cords.append((Y,X, prob))
-                    
+                        minu_cords.append((Y,X))
 
+            if len(minu_cords)!= 0:
+                mean_y = sum(y for y, x in minu_cords) / len(minu_cords)
+                mean_x = sum(x for y, x in minu_cords) / len(minu_cords)
 
-            max_prob = max(minu_cords, key=lambda x : x[2])#max(minu_cords, key=lambda x: x[2])
+                # Create a new tuple with the mean values
+                mean_tuple = (mean_y, mean_x)
 
-            """
-            mean_y = sum(y for y, x in minu_cords) / len(minu_cords)
-            mean_x = sum(x for y, x in minu_cords) / len(minu_cords)
+                new_image = cv.circle(new_image, (Y,X), 4,(255,0,0),1)
 
-            # Create a new tuple with the mean values
-            mean_tuple = (mean_y, mean_x)
-            """
-            mean_y,mean_x,_ = max_prob
-            new_image = cv.circle(new_image, (int(mean_y),int(mean_x)), 4,(255,0,0),1)
-
-            minutaes[len(minutaes.keys())+1] = {"Num":len(minutaes.keys())+1,"X":mean_x,"Y":mean_y, "prob":max_prob[2]}
-
-            count+=1
-
-        else:
-            blocs_mask.append(copy.deepcopy(bloc_classified))
+                minutaes[len(minutaes.keys())+1] = {"Num":len(minutaes.keys())+1,"X":X,"Y":Y}
     
-    return new_image*255,supprimer_instances_proches(minutaes)    
+                count+=1
 
-
-def supprimer_instances_proches(minutaes):
-    """
-    Supprime pour chaque instance, les instances proches (distance euclidienne < 10) 
-    ayant la plus faible probabilité.
-
-    Args:
-        minutaes: Un dictionnaire Python contenant les points minutieux.
-
-    Returns:
-        minutaes: Le dictionnaire mis à jour après suppression des instances proches.
-    """
-
-    # Parcourir chaque instance
-    for i in range(len(minutaes)):
-        # Déterminer les instances proches
-        distances = []
-        for j in range(len(minutaes)):
-            if i != j:
-                distance = euclidean_distance(minutaes[i]["X"], 
-                                            minutaes[i]["Y"], 
-                                            minutaes[j]["X"], 
-                                            minutaes[j]["Y"])
-                distances.append((j, distance))
-
-        # Supprimer l'instance proche avec la plus faible probabilité
-        if distances:
-            distances.sort(key=lambda x: x[1])
-            j_min, _ = distances[0]
-        if minutaes[i]["prob"] < minutaes[j_min]["prob"]:
-            del minutaes[i]
-        else:
-            del minutaes[j_min]
-
-    return minutaes
-
-
- 
-
-
- 
+    
+    return new_image*255,minutaes     
 
 

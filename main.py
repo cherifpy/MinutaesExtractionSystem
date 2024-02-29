@@ -14,10 +14,10 @@ bloc_size = (45,45,1)
 
 if __name__ == "__main__":
 
-    for fingerprint in os.listdir("G:/CS Extraction minuties/ImagesTests"):
+    for fingerprint in os.listdir("ImagesTests/"):
         print("Extraction de "+fingerprint)
-        image_path = "G:/CS Extraction minuties/ImagesTests/"+fingerprint
-        image_with_minutaes,minutaes = MinutaesExtraction(image_path,bloc_size,codage_M1,weight_fM1,
+        image_path = "ImagesTests/"+fingerprint
+        image_with_minutaes,minutaes = MinutiaesExtractionV2(image_path,bloc_size,codage_M1,weight_fM1,
                                                 codage_M2,weight_fM2)
         print("Nombre de minuties trouvées: ",len(minutaes.keys()))
 
@@ -25,13 +25,13 @@ if __name__ == "__main__":
         #Minutaes excel file creation
         df = pd.DataFrame(minutaes)
         df = df.transpose()
-        excel_file_path = "Minutaes/"+excel_file_name+"_"+image_name+'.xlsx'
+        excel_file_path = "Minutaes/"+excel_file_name+"_"+image_name+'2.xlsx'
         df.to_excel(excel_file_path, index=False)
 
 
         #Mask save
         
-        cv.imwrite("ImagesMarked/"+image_name+"_marked.png",image_with_minutaes)
+        cv.imwrite("ImagesMarked/"+image_name+"_marked2.png",image_with_minutaes)
 
 
     
